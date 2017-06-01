@@ -1,0 +1,497 @@
+# +---------------------------------------------------------------------------+
+# | Kickstat File : esx-pri
+# +---------------------------------------------------------------------------+ 
+
+
+# +---------------------------------------------------------------------------+
+# | Start of ESXi 5.0.0 Update1 (Build 623860) Kick Start Script (1-5-2012)
+# +---------------------------------------------------------------------------+ 
+
+# +---------------------------------------------------------------------------+
+# |Is It a Dryrun (parse and test)
+# +---------------------------------------------------------------------------+ 
+#dryrun
+
+# +---------------------------------------------------------------------------+
+# | Accept License agreement
+# +---------------------------------------------------------------------------+ 
+vmaccepteula
+
+
+# +---------------------------------------------------------------------------+
+# | Disk Partitioning
+# | Clear all partitions in first detected disk and overwrite any VMFS 
+# | partitions on the specified drives.
+# +---------------------------------------------------------------------------+
+#clearpart --firstdisk --overwritevmfs
+clearpart --firstdisk=hpsa --overwritevmfs
+
+
+
+# +---------------------------------------------------------------------------+
+# | Installation media location
+# +---------------------------------------------------------------------------+
+# Fresh installation on first disk and overwrite an existing VMFS datastore
+#install --firstdisk --overwritevmfs
+install --firstdisk=hpsa --overwritevmfs
+
+
+# +---------------------------------------------------------------------------+
+# | Root password and Authication format
+# | Default is shadow password enabled, MD5-based passwords enabled
+# | Encrypted Root Password in MD5 format
+# +---------------------------------------------------------------------------+
+# root password in MD5 format
+rootpw --iscrypted $1$hgxyTT/.$J7eWEYxhJsMgwFSWbkW0L.
+#rootpw password
+# +---------------------------------------------------------------------------+
+# | Reboot after installation
+# +---------------------------------------------------------------------------+
+reboot
+
+
+# +---------------------------------------------------------------------------+
+# | %include
+# +---------------------------------------------------------------------------+
+%include /tmp/networkconfig
+
+
+# +---------------------------------------------------------------------------+
+# | Specifies script to run before the kickstart configuration is evaluated
+# +---------------------------------------------------------------------------+
+%pre --interpreter=busybox 
+ 
+# +---------------------------------------------------------------------------+
+# | Set default Management Interface
+# | addvmportgroup set to "0" to disable the creation of default guest VM Network
+# +---------------------------------------------------------------------------+
+VMK_INT="vmk0"
+VMK_LINE=$(localcli network ip interface ipv4 get | grep "${VMK_INT}")
+IPADDR=192.168.5.100
+NETMASK=255.255.255.0
+GATEWAY="192.168.5.253"
+DNS="192.168.5.30"
+HOSTNAME=esx-pri
+vlanid="**5"
+ 
+echo "network --bootproto=static --addvmportgroup=false --device=vmnic0 --ip=${IPADDR} --netmask=${NETMASK} --gateway=${GATEWAY} --nameserver=${DNS} --hostname=${HOSTNAME} --vlanid=${vlanid}" > /tmp/networkconfig
+
+
+# +---------------------------------------------------------------------------+
+# | Specifies script to run after ESXi is installed and before reboot
+# +---------------------------------------------------------------------------+
+%post --interpreter=busybox --ignorefailure=true
+
+
+
+
+# +---------------------------------------------------------------------------+
+# | Specifies script to run after ESXi installation and after first reboot
+# | Most of the shell command will enabled after the first reboot
+# +---------------------------------------------------------------------------+
+%firstboot --interpreter=busybox 
+
+
+# +---------------------------------------------------------------------------+
+# | Set Script Variable for use in script
+# | Variable can only be define after the first reboot and when the full bshell
+# | is in place
+# +---------------------------------------------------------------------------+ 
+
+# +---------------------------------------------------------------------------+
+# | rename local datastore to something more meaningful
+# +---------------------------------------------------------------------------+
+vim-cmd hostsvc/datastore/rename datastore1 "$(hostname -s)-datastore1"
+
+
+# +---------------------------------------------------------------------------+
+# |  Assign VMware license
+# +---------------------------------------------------------------------------+
+vim-cmd vimsvc/license --set M5425-42244-48J48-0232H-******
+
+# +---------------------------------------------------------------------------+
+# | vSwitch configuration
+# +---------------------------------------------------------------------------+
+# vSwitch0 : Active->vmnic0,vmnic2 Standby->vmnic1,vmnic3,
+#       failback: yes
+#       faildectection: link
+#       load balancing: portid
+#       notify switches: yes
+#       avg bw: 1000000 Kbps
+#       peak bw: 1000000 Kbps
+#       burst size: 819200 KBps
+#       allow forged transmits: no
+#       allow mac change: no
+#       allow promiscuous no
+#       cdp status: both
+
+# +---------------------------------------------------------------------------+
+# | attach vmnic1,vmnic2,vmnic3 to vSwitch0
+# +---------------------------------------------------------------------------+
+esxcli network vswitch standard uplink add --uplink-name vmnic1 --vswitch-name vSwitch0
+esxcli network vswitch standard uplink add --uplink-name vmnic2 --vswitch-name vSwitch0
+esxcli network vswitch standard uplink add --uplink-name vmnic3 --vswitch-name vSwitch0
+#esxcli network vswitch standard uplink add --uplink-name vmnic4 --vswitch-name vSwitch0
+#esxcli network vswitch standard uplink add --uplink-name vmnic5 --vswitch-name vSwitch0
+#esxcli network vswitch standard uplink add --uplink-name vmnic6 --vswitch-name vSwitch0
+#esxcli network vswitch standard uplink add --uplink-name vmnic7 --vswitch-name vSwitch0
+
+# +---------------------------------------------------------------------------+
+# | remove default VM Network port group if required ?
+# +---------------------------------------------------------------------------+
+esxcli network vswitch standard portgroup remove --portgroup-name="VM Network" --vswitch-name vSwitch0   
+ 
+# +---------------------------------------------------------------------------+
+# | configure portgroup
+# +---------------------------------------------------------------------------+
+esxcli network vswitch standard portgroup add --portgroup-name SED-I-**1 --vswitch-name vSwitch0
+esxcli network vswitch standard portgroup set --portgroup-name SED-I-**1 --vlan-id **1
+esxcli network vswitch standard portgroup add --portgroup-name DPM-DPM-**2 --vswitch-name vSwitch0
+esxcli network vswitch standard portgroup set --portgroup-name DPM-DPM-**2 --vlan-id **2
+esxcli network vswitch standard portgroup add --portgroup-name ILO-**3 --vswitch-name vSwitch0
+esxcli network vswitch standard portgroup set --portgroup-name ILO-**3 --vlan-id **3
+esxcli network vswitch standard portgroup add --portgroup-name CISCO-**4 --vswitch-name vSwitch0
+esxcli network vswitch standard portgroup set --portgroup-name CISCO-**4 --vlan-id **4
+#esxcli network vswitch standard portgroup add --portgroup-name Scon-**5 --vswitch-name vSwitch0
+#esxcli network vswitch standard portgroup set --portgroup-name "Management Network" --vlan-id **5
+esxcli network vswitch standard portgroup add --portgroup-name CCM-DPM-**7 --vswitch-name vSwitch0
+esxcli network vswitch standard portgroup set --portgroup-name CCM-DPM-**7 --vlan-id **7
+esxcli network vswitch standard portgroup add --portgroup-name SED-X --vswitch-name vSwitch0
+esxcli network vswitch standard portgroup set --portgroup-name SED-X --vlan-id 0
+esxcli network vswitch standard portgroup add --portgroup-name SIP-X --vswitch-name vSwitch0
+esxcli network vswitch standard portgroup set --portgroup-name SIP-X --vlan-id 0
+
+
+# +---------------------------------------------------------------------------+
+# |configure cdp
+# +---------------------------------------------------------------------------+
+esxcli network vswitch standard set --cdp-status both --vswitch-name vSwitch0
+
+
+# +---------------------------------------------------------------------------+
+# | edited - configure active and standby uplinks for vSwitch0
+# +---------------------------------------------------------------------------+ 
+esxcli network vswitch standard policy failover set --active-uplinks vmnic0,vmnic2 --standby-uplinks vmnic1,vmnic3 --vswitch-name vSwitch0
+
+
+# +---------------------------------------------------------------------------+
+# | edited configure failure detection + load balancing (could have appended to previous line)
+# +---------------------------------------------------------------------------+ 
+esxcli network vswitch standard policy failover set --failback yes --failure-detection link --load-balancing portid --notify-switches yes --vswitch-name vSwitch0
+
+
+# +---------------------------------------------------------------------------+
+# | FAILOVER CONFIGURATIONS - Portgropup
+# +---------------------------------------------------------------------------+
+esxcli network vswitch standard portgroup policy failover set --active-uplinks vmnic1,vmnic3 --standby-uplinks vmnic0,vmnic2 --portgroup-name="Management Network"
+
+# +---------------------------------------------------------------------------+
+# | configure failure detection + load balancing on "Management Network" Portgroup 
+# |(could have appended to previous line)
+# +---------------------------------------------------------------------------+
+esxcli network vswitch standard portgroup policy failover set --failback yes --failure-detection link --load-balancing portid --notify-switches yes --portgroup-name="Management Network"
+
+
+# +---------------------------------------------------------------------------+
+# | SECURITY CONFIGURATION
+# +---------------------------------------------------------------------------+
+esxcli network vswitch standard policy security set --allow-forged-transmits no --allow-mac-change no --allow-promiscuous no --vswitch-name vSwitch0
+
+
+# +---------------------------------------------------------------------------+
+# | SHAPING CONFIGURATION 
+# +---------------------------------------------------------------------------+
+esxcli network vswitch standard policy shaping set --enabled yes --avg-bandwidth 100000 --peak-bandwidth 100000 --burst-size 819200 --vswitch-name vSwitch0
+
+# +---------------------------------------------------------------------------+
+# | Update the file /etc/vmware/hostd/hostsvc.xml with the parameters to tick the 
+# |Management Network portgroup Management Traffic box
+# +---------------------------------------------------------------------------+
+echo "Stopping the hostd"
+/etc/init.d/hostd stop
+sleep 5
+echo "Enabling 'Management' on vmk0"
+sed  -ie 's/<ConfigRoot>/<ConfigRoot>\n <mangementVnics>\n <nic id="0000">vmk0<\/nic>\n <\/mangementVnics>/' /etc/vmware/hostd/hostsvc.xml
+echo "Starting the hostd"
+/etc/init.d/hostd start
+
+# +---------------------------------------------------------------------------+
+# | enable management interface
+# +---------------------------------------------------------------------------+
+# Still need to use python/MOB trick
+cat > /tmp/enableVmkInterface.py << __ENABLE_MGMT_INT__
+import sys,re,os,urllib,urllib2
+ 
+# connection info to MOB
+url = "https://localhost/mob/?moid=ha-vnic-mgr&method=selectVnic"
+username = "root"
+password = "password"
+ 
+# Create global variables
+global passman,authhandler,opener,req,page,page_content,nonce,headers,cookie,params,e_params
+ 
+#auth
+passman = urllib2.HTTPPasswordMgrWithDefaultRealm()
+passman.add_password(None,url,username,password)
+authhandler = urllib2.HTTPBasicAuthHandler(passman)
+opener = urllib2.build_opener(authhandler)
+urllib2.install_opener(opener)
+ 
+# Code to capture required page data and cookie required for post back to meet CSRF requirements  ###
+req = urllib2.Request(url)
+page = urllib2.urlopen(req)
+page_content= page.read()
+ 
+# regex to get the vmware-session-nonce value from the hidden form entry
+reg = re.compile('name="vmware-session-nonce" type="hidden" value="?([^\s^"]+)"')
+nonce = reg.search(page_content).group(1)
+ 
+# get the page headers to capture the cookie
+headers = page.info()
+cookie = headers.get("Set-Cookie")
+ 
+#execute method
+params = {'vmware-session-nonce':nonce,'nicType':'management','device':'vmk0'}
+e_params = urllib.urlencode(params)
+req = urllib2.Request(url, e_params, headers={"Cookie":cookie})
+page = urllib2.urlopen(req).read()
+__ENABLE_MGMT_INT__
+python /tmp/enableVmkInterface.py
+
+
+# +---------------------------------------------------------------------------+
+# | SYSLOG CONFIGURATION
+# +---------------------------------------------------------------------------+
+esxcli system syslog config set --default-rotate=20 --loghost=udp://192.168.9.238:514,ssl://192.168.9.238:1514
+
+
+# +---------------------------------------------------------------------------+
+# | change the individual syslog rotation count
+# +---------------------------------------------------------------------------+
+esxcli system syslog config logger set --id=hostd --rotate=20 --size=2048
+esxcli system syslog config logger set --id=vmkernel --rotate=20 --size=2048
+esxcli system syslog config logger set --id=fdm --rotate=20
+esxcli system syslog config logger set --id=vpxa --rotate=20
+
+
+# +---------------------------------------------------------------------------+
+# | NTP CONFIGURATIONS
+# +---------------------------------------------------------------------------+
+cat > /etc/ntp.conf << __NTP_CONFIG__
+restrict default kod nomodify notrap noquerynopeer
+restrict 127.0.0.1
+server 192.168.5.30
+__NTP_CONFIG__
+/sbin/chkconfig --level 345 ntpd on
+
+
+# +---------------------------------------------------------------------------+
+# | FIREWALL CONFIGURATION 
+# +---------------------------------------------------------------------------+
+
+
+# +---------------------------------------------------------------------------+
+# | Enable firewall
+# +---------------------------------------------------------------------------+
+esxcli network firewall set --default-action false --enabled=yes 
+
+
+# +---------------------------------------------------------------------------+
+# | services to enable by default
+# +---------------------------------------------------------------------------+
+FIREWALL_SERVICES="syslog ntpClient vSphereClient"
+for SERVICE in ${FIREWALL_SERVICES}
+do
+ esxcli network firewall ruleset set --ruleset-id ${SERVICE} --enabled=yes 
+done 
+
+
+# +---------------------------------------------------------------------------+
+# | Deny Allowed-all access list on the firewall
+# +---------------------------------------------------------------------------+
+FIREWALL_DIP_SERVICES="syslog ntpClient vSphereClient"
+for SERVICE_DIP in ${FIREWALL_DIP_SERVICES}
+do
+ esxcli network firewall ruleset set --allowed-all=false --ruleset-id ${SERVICE_DIP}
+done
+
+# +---------------------------------------------------------------------------+
+# | configure IPV4 access list on the firewall 
+# +---------------------------------------------------------------------------+
+FIREWALL_IP_SERVICES="syslog ntpClient vSphereClient"
+for SERVICE_IP in ${FIREWALL_IP_SERVICES}
+do
+ esxcli network firewall ruleset allowedip add --ip-address=192.168.5.30 --ruleset-id ${SERVICE_IP}
+done
+
+
+# +---------------------------------------------------------------------------+
+# | swicth off firewall ports
+# +---------------------------------------------------------------------------+
+FIREWALL_D_SERVICES="dns faultTolerance NFC HBR WOL webAccess netDump snmp vMotion dhcp CIMSLP CIMHttpServer CIMHttpsServer vpxHeartbeats"
+for SERVICE_D in ${FIREWALL_D_SERVICES}
+do
+ esxcli network firewall ruleset set --ruleset-id ${SERVICE_D} --enabled=no
+done
+
+
+# +---------------------------------------------------------------------------+
+# |  enable & start remote ESXi Shell  (SSH)
+# +---------------------------------------------------------------------------+
+vim-cmd hostsvc/enable_ssh
+vim-cmd hostsvc/start_ssh
+
+
+# +---------------------------------------------------------------------------+
+# | Refresh all firewall services
+# +---------------------------------------------------------------------------+
+#esxcli network firewall refresh 
+
+# +---------------------------------------------------------------------------+
+# | Save the firewall configuration 
+# +---------------------------------------------------------------------------+
+#cp /etc/vmware/firewall/service.xml /vmfs/volumes/$(hostname -s)-datastore1
+
+# +---------------------------------------------------------------------------+
+# | add configuration to the /etc/rc.local file 
+# +---------------------------------------------------------------------------+
+#sed -i '$ a\cp /vmfs/volumes/$(hostname -s)-datastore1/services.xml /etc/vmware/firewall' /etc/rc.local
+#sed -i '$ a\esxcli network firewall refresh' /etc/rc.local
+
+# +---------------------------------------------------------------------------+
+# | Shut down the DCUI & vpxa & USB arbitrator (SSH left on)
+# +---------------------------------------------------------------------------+
+FIREWALL_DAEMON_SERVICES="DCUI vpxa usbarbitrator ESXShell sfcbd-watchdog"
+for SERVICE_DAEMON in ${FIREWALL_DAEMON_SERVICES}
+do
+ chkconfig ${SERVICE_DAEMON} off
+done
+
+
+
+# +---------------------------------------------------------------------------+
+# |  Backup ESXi configuration to persist changes
+# +---------------------------------------------------------------------------+
+/sbin/auto-backup.sh
+
+# +---------------------------------------------------------------------------+
+# | ESXi Host - Secuiry Hardening
+# +---------------------------------------------------------------------------+
+vim-cmd proxysvc/remove_service "/" "httpsWithRedirect"
+vim-cmd proxysvc/remove_service "/mob" "httpsWithRedirect"
+
+
+# +---------------------------------------------------------------------------+
+# |  Create SSH Banner
+# +---------------------------------------------------------------------------+
+/bin/cat > /etc/banner.new <<SSHEOF
+${INDENTATION:-}======================================================
+${INDENTATION:-}=                 Company.COM LTD                   =
+${INDENTATION:-}======================================================
+${INDENTATION:-}
+${INDENTATION:-}======================================================
+${INDENTATION:-}=   WARNING: UNAUTHORIZED USE IS PROHIBITED          =
+${INDENTATION:-}=   -----------------------------------------        =
+${INDENTATION:-}=   Property of Company.com Ltd, and should only    =
+${INDENTATION:-}=   be accessed by authorized Company employees.    =
+${INDENTATION:-}=   Do not attempt to login unless you are an        =
+${INDENTATION:-}=   authorized user.                                 =
+${INDENTATION:-}=                                                    =
+${INDENTATION:-}=   Any authorized or unauthorized access and use,   =
+${INDENTATION:-}=   will be monitored and anyone using this system   =
+${INDENTATION:-}=   expressly consents to such monitoring. If such   =
+${INDENTATION:-}=   monitoring reveals possible envidence of criminal=
+${INDENTATION:-}=   activity, such evidence will be provided to law  =
+${INDENTATION:-}=   enforcement personnel and can result in criminal =
+${INDENTATION:-}=   or civil prosecution under applicable law of     =
+${INDENTATION:-}=   the United Kingdom (UK).                         =
+${INDENTATION:-}======================================================
+SSHEOF
+# copy new banner file to overwrite /etc/issue (esxi 5 store it's banner file here)
+cp /etc/banner.new /etc/issue
+
+# +---------------------------------------------------------------------------+
+# |  vm Autostart Rules #configure virtual machine autostart rules
+# +---------------------------------------------------------------------------+
+#vim-cmd hostsvc/autostartmanager/enable_autostart true
+#vim-cmd hostsvc/autostartmanager/update_defaults 120 120 "GuestShutdown" true
+
+
+# +---------------------------------------------------------------------------+
+# |  auto restart all Vm's 
+# +---------------------------------------------------------------------------+
+sed -i '$ a\for i in $(vim-cmd vmsvc/getallvms|cut -f1 -d" "|grep -v Vmid); do vim-cmd vmsvc/power.on $i; sleep 10; done' /etc/rc.local
+
+
+
+
+# +---------------------------------------------------------------------------+
+# |  Update ESXi Host
+# +---------------------------------------------------------------------------+
+#vim-cmd hostsvc/maintenance_mode_enter
+#DS=`ls /vmfs/volumes/ | grep datastore`
+#wget -P "/vmfs/volumes/${DS}/" http://10.10.55.5/ESXi500-201111001.zip
+#esxcli software vib update --depot="/vmfs/volumes/${DS}/ESXi500-201111001.zip"
+#vim-cmd hostsvc/maintenance_mode_exit
+
+# +---------------------------------------------------------------------------+
+# |  Create Resource Pools (SED=pool0,DPM=pool2,CCM=pool3)
+# +---------------------------------------------------------------------------+
+#vim-cmd /hostsvc/rsrc/create --cpu-max=4800 --cpu-shares=normal --cpu-min-expandable=FALSE --mem-min=29 --mem-min-expandable=FALSE --mem-max=2048 --mem-shares=normal ha-root-pool SED
+vim-cmd /hostsvc/rsrc/create --cpu-max=480 --cpu-shares=normal --cpu-min-expandable=FALSE --mem-min=29 --mem-min-expandable=FALSE --mem-max=204 --mem-shares=normal ha-root-pool SED
+#vim-cmd /hostsvc/rsrc/create --cpu-min=5664 --cpu-max=2400 --cpu-shares=high --cpu-min-expandable=FALSE --mem-min=16384 --mem-min-expandable=FALSE --mem-max=16384 --mem-shares=high ha-root-pool DPM
+vim-cmd /hostsvc/rsrc/create --cpu-min=566 --cpu-max=240 --cpu-shares=high --cpu-min-expandable=FALSE --mem-min=163 --mem-min-expandable=FALSE --mem-max=163 --mem-shares=high ha-root-pool DPM
+#vim-cmd /hostsvc/rsrc/create --cpu-min=2400 --cpu-max=2400 --cpu-shares=normal --cpu-min-expandable=FALSE --mem-min=1024 --mem-min-expandable=FALSE --mem-max=1024 --mem-shares=normal ha-root-pool CCM
+vim-cmd /hostsvc/rsrc/create --cpu-min=240 --cpu-max=240 --cpu-shares=normal --cpu-min-expandable=FALSE --mem-min=102 --mem-min-expandable=FALSE --mem-max=102 --mem-shares=normal ha-root-pool CCM
+
+
+# +---------------------------------------------------------------------------+
+# |  Import the SED form the DVD-ROM, unzip the .tar file and register the VM
+# +---------------------------------------------------------------------------+
+vmkload_mod iso9660
+vsish -e set /vmkModules/iso9660/mount $(esxcfg-mpath -b | grep "CD-ROM" | awk '{print $1}')
+#source_dir=/vmfs/volumes/VMWARE_ESXI5_CUSTOM/VM
+#post_dir=/vmfs/volumes/$(hostname -s)-datastore1/Staging_Folder
+mkdir -p /vmfs/volumes/$(hostname -s)-datastore1/Staging_Folder
+#cp -r ${source_dir}/* ${post_dir}
+cp -r /vmfs/volumes/VMWARE_ESXI5_CUSTOM/VM/* /vmfs/volumes/$(hostname -s)-datastore1/Staging_Folder
+sleep 5
+tar -zxvf /vmfs/volumes/$(hostname -s)-datastore1/Staging_Folder/2012SED-A.TGZ -C /vmfs/volumes/$(hostname -s)-datastore1
+sleep 5
+
+# +---------------------------------------------------------------------------+
+# | Register the SED with ESXi inside Resource pool (SED, pool0)
+# +---------------------------------------------------------------------------+
+#####advanced options####vim-cmd solo/registervm /vmfs/volumes/$(hostname -s)-datastore1/2012alpha-SED-B/2012alpha-SED-B.vmx `cat /etc/vmware/hostd/pools.xml | grep "SED" -A1 | grep "[objID]" | sed 's///;s/<\/objID>//g' | sed -e 's/^[[:blank:]]*//;s/[[:blank:]]*$//'`
+vim-cmd solo/registervm /vmfs/volumes/$(hostname -s)-datastore1/2012alpha-SED-B/2012alpha-SED-B.vmx 2012alpha-SED-B pool0
+
+
+# +---------------------------------------------------------------------------+
+# | Save the firewall configuration on the post?
+# +---------------------------------------------------------------------------+
+#cp /etc/vmware/firewall/service.xml /vmfs/volumes/$(hostname -s)-datastore1
+
+# +---------------------------------------------------------------------------+
+# |  Backup ESXi configuration to persist changes
+# +---------------------------------------------------------------------------+
+/sbin/auto-backup.sh
+
+
+# +---------------------------------------------------------------------------+
+# |  copy %first boot script logs to persisted datastore
+# +---------------------------------------------------------------------------+
+cp /var/log/hostd.log "/vmfs/volumes/$(hostname -s)-datastore1/firstboot-hostd.log"
+cp /var/log/esxi_install.log "/vmfs/volumes/$(hostname -s)-datastore1/firstboot-esxi_install.log"
+cp /etc/vmware/esx.conf "/vmfs/volumes/$(hostname -s)-datastore1"
+
+
+  
+# +---------------------------------------------------------------------------+
+# |  Reboot
+# +---------------------------------------------------------------------------+
+reboot
+
+
+##-------------------------------------------------------------------------- 
+##  End of kickstart Script
+##--------------------------------------------------------------------------
